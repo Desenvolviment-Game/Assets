@@ -11,23 +11,25 @@ public class SnakeController : MonoBehaviour
     public GameObject segmentoPrefab;
 
     private int enemyPassosContador = 0;
-    private bool mudouDirecaoNesseFrame = false; // Trava de segurança para inputs rápidos
-    private Transform containerCorpo; // Referência para a pasta organizadora
+    private bool mudouDirecaoNesseFrame = false; 
+    private Transform containerCorpo; 
 
     void Start()
     {
-        // Força a cabeça a iniciar no Z correto
+        // Garante que a cabeça comece no plano 2D correto
         transform.position = new Vector3(transform.position.x, transform.position.y, 0f);
         
-        // Cria automaticamente um objeto organizador na Hierarquia para não entulhar a tela
+        // Cria um container na hierarquia para organizar os clones do corpo
         GameObject goContainer = new GameObject("Container_Corpo");
         containerCorpo = goContainer.transform;
 
-        // Garante que a lista comece limpa e apenas com a própria cabeça
         segmentos.Clear();
         segmentos.Add(this.transform);
 
-        // Inicia o loop de movimento contínuo
+        // Aplica a rotação inicial baseada na direção de partida
+        RotacionarCabeca();
+
+        // Inicia o loop de movimentação por tempo fixo
         StartCoroutine(LoopMovimento());
     }
 
@@ -36,10 +38,10 @@ public class SnakeController : MonoBehaviour
         if (GameManager.Instance == null) return;
         if (GameManager.Instance.estadoAtual != "JOGANDO" || GameManager.Instance.paused) return;
 
-        // Se o jogador já mudou a direção e a cobra ainda não deu o passo, bloqueia novos comandos
+        // Evita que o jogador aperte dois botões no mesmo frame e se atropele
         if (mudouDirecaoNesseFrame) return;
 
-        // Captura as setas ou WASD sem permitir que ela vire diretamente de costas
+        // Captura as teclas W, A, S, D ou Setas do teclado
         if ((Input.GetKeyDown(KeyCode.UpArrow) || Input.GetKeyDown(KeyCode.W)) && direcao != Vector2.down)
         {
             direcao = Vector2.up;
@@ -70,7 +72,7 @@ public class SnakeController : MonoBehaviour
             {
                 Mover();
             }
-            // Ajusta o tempo com base na velocidade dinâmica do GameManager
+            // Puxa a velocidade atual configurada no GameManager
             float velocidadeAtual = GameManager.Instance != null ? GameManager.Instance.speed : 10f;
             yield return new WaitForSeconds(1f / velocidadeAtual);
         }
@@ -78,19 +80,19 @@ public class SnakeController : MonoBehaviour
 
     void Mover()
     {
-        // Como a cobra vai andar agora, liberamos a trava para aceitar o próximo comando do teclado
         mudouDirecaoNesseFrame = false;
 
-        // Move os segmentos do rabo de trás para frente
+        // Move os segmentos de trás para a frente, copiando Posição E Rotação do gomo anterior
         for (int i = segmentos.Count - 1; i > 0; i--)
         {
             segmentos[i].position = segmentos[i - 1].position;
+            segmentos[i].rotation = segmentos[i - 1].rotation; 
         }
 
         // Calcula a nova posição da cabeça
         Vector3 novaPosicao = transform.position + new Vector3(direcao.x, direcao.y, 0f);
 
-        // Sistema de atravessar paredes (Wrap-around)
+        // Sistema de atravessar paredes (fazer a cobra reaparecer no lado oposto)
         if (GameManager.Instance != null)
         {
             GameManager gm = GameManager.Instance;
@@ -101,12 +103,16 @@ public class SnakeController : MonoBehaviour
             else if (novaPosicao.y > gm.limiteY.y) novaPosicao.y = gm.limiteY.x;
         }
 
+        // Move a cabeça de fato
         transform.position = new Vector3(novaPosicao.x, novaPosicao.y, 0f);
+        
+        // Gira a cabeça para a direção correta do sprite
+        RotacionarCabeca();
 
-        // Checa colisões logo após se mover
+        // Checa colisões usando o sistema otimizado por distância matemática
         ChecarColisoesPorGrade();
 
-        // Controla o movimento dos inimigos a cada 5 passos
+        // Controla o ritmo de passos dos inimigos perseguidores
         enemyPassosContador++;
         if (enemyPassosContador >= 5)
         {
@@ -115,45 +121,56 @@ public class SnakeController : MonoBehaviour
         }
     }
 
+    // Sistema corrigido para sprites desenhados originalmente olhando para BAIXO
+    void RotacionarCabeca()
+    {
+        if (direcao == Vector2.down)
+            transform.rotation = Quaternion.Euler(0f, 0f, 0f);      // Mantém original (0°)
+        else if (direcao == Vector2.up)
+            transform.rotation = Quaternion.Euler(0f, 0f, 180f);    // Inverte completamente (180°)
+        else if (direcao == Vector2.left)
+            transform.rotation = Quaternion.Euler(0f, 0f, -90f);    // Gira para a esquerda (-90°)
+        else if (direcao == Vector2.right)
+            transform.rotation = Quaternion.Euler(0f, 0f, 90f);     // Gira para a direita (90°)
+    }
+
     void ChecarColisoesPorGrade()
     {
-        // 1. Colisão com o próprio corpo (ignora o índice 0 que é a própria cabeça)
+        // Colisão com o próprio corpo (Começa no índice 1 para não colidir com ela mesma)
         for (int i = 1; i < segmentos.Count; i++)
         {
             if (Vector3.Distance(transform.position, segmentos[i].position) < 0.2f)
             {
-                Debug.Log("Game Over: Bateu no rabo!");
                 GameOver();
                 return;
             }
         }
 
-        // 2. Colisão com os Inimigos na cena
+        // Colisão com Inimigos
         if (GameManager.Instance != null)
         {
             foreach (GameObject inimigo in GameManager.Instance.GetInimigos())
             {
                 if (inimigo != null && Vector3.Distance(transform.position, inimigo.transform.position) < 0.2f)
                 {
-                    Debug.Log("Game Over: Bateu no Inimigo!");
                     GameOver();
                     return;
                 }
             }
         }
 
-        // 3. Colisão com a Comida usando busca ativa por Tag
+        // Colisão com Comidas normais na cena
         GameObject[] comidasNaCena = GameObject.FindGameObjectsWithTag("Comida");
         foreach (GameObject comida in comidasNaCena)
         {
             if (comida != null && Vector3.Distance(transform.position, comida.transform.position) < 0.6f)
             {
                 ProcessarColisao(comida);
-                return; // Interrompe para evitar colisões múltiplas no mesmo frame
+                return;
             }
         }
 
-        // 4. Colisão com Power-ups usando busca ativa por Tag
+        // Colisão com PowerUps na cena
         GameObject[] powerupsNaCena = GameObject.FindGameObjectsWithTag("PowerUp");
         foreach (GameObject pu in powerupsNaCena)
         {
@@ -165,15 +182,10 @@ public class SnakeController : MonoBehaviour
         }
     }
 
-    // Gatilhos físicos reservas (caso a Unity resolva usar a física padrão)
+    // Mantido por segurança caso use gatilhos físicos tradicionais (2D Trigger)
     private void OnTriggerEnter2D(Collider2D other)
     {
         if (other != null) ProcessarColisao(other.gameObject);
-    }
-
-    private void OnCollisionEnter2D(Collision2D collision)
-    {
-        if (collision != null && collision.gameObject != null) ProcessarColisao(collision.gameObject);
     }
 
     void ProcessarColisao(GameObject objAcertado)
@@ -182,18 +194,12 @@ public class SnakeController : MonoBehaviour
 
         if (objAcertado.CompareTag("Comida"))
         {
-            // 1. Primeiro faz a cobra crescer
             Crescer();
-            
-            // 2. Destrói IMEDIATAMENTE o objeto antigo para limpar o espaço na grade
             Destroy(objAcertado); 
 
-            // 3. Comunica com o GameManager de forma assíncrona/segura
             if (GameManager.Instance != null)
             {
                 GameManager.Instance.AdicionarPontos();
-                
-                // Dá um intervalo mínimo para a Unity limpar a memória antes de sortear nova comida
                 GameManager.Instance.Invoke("SpawnComida", 0.01f);
             }
         }
@@ -213,19 +219,22 @@ public class SnakeController : MonoBehaviour
     {
         if (segmentoPrefab == null) return;
 
-        // OTIRMIZAÇÃO: Instancia o novo segmento já definindo o containerCorpo como pai dele
+        // Instancia o novo pedaço do corpo atrelando-o ao organizador
         GameObject novoSegmento = Instantiate(segmentoPrefab, containerCorpo);
         
-        // Posição do novo segmento vai atrás do último elemento atual da lista
+        // Copia a posição e a rotação exata do último gomo da lista para nascer alinhado
         Vector3 pos = segmentos[segmentos.Count - 1].position;
+        Quaternion rot = segmentos[segmentos.Count - 1].rotation;
+        
         novoSegmento.transform.position = new Vector3(pos.x, pos.y, 0f);
+        novoSegmento.transform.rotation = rot;
         
         segmentos.Add(novoSegmento.transform);
     }
 
     public void ResetSnake()
     {
-        // Limpa o corpo antigo guardando apenas a cabeça
+        // Limpa os gomos antigos da tela ao reiniciar
         for (int i = 1; i < segmentos.Count; i++)
         {
             if (segmentos[i] != null) Destroy(segmentos[i].gameObject);
@@ -234,8 +243,10 @@ public class SnakeController : MonoBehaviour
         segmentos.Clear();
         segmentos.Add(this.transform);
         
+        // Reseta posição e rotação padrão
         transform.position = Vector3.zero; 
         direcao = Vector2.right;
+        RotacionarCabeca();
     }
 
     void MoverInimigos()
@@ -270,7 +281,7 @@ public class SnakeController : MonoBehaviour
     {
         if (GameManager.Instance != null)
         {
-            GameManager.Instance.estadoAtual = "MENU";
+            GameManager.Instance.FinalizarJogo(); // Corrigido erro de ortografia ortográfica
         }
         ResetSnake();
     }
